@@ -67,6 +67,14 @@
     box-shadow: 0 10px 30px rgba(0,0,0,.08);
   }
   #map { width: 100%; height: 300px; }
+  #stage { width: 100%; height: 300px; display: block; touch-action: none; cursor: grab; }
+  #stage:active { cursor: grabbing; }
+  #loading {
+    position: absolute; inset: 0 0 41px 0; display: grid; place-items: center;
+    font-size: 13px; color: var(--muted); pointer-events: none;
+  }
+  .card { position: relative; }
+  [hidden] { display: none !important; }
   .cap {
     display: flex; justify-content: space-between; gap: 12px;
     padding: 10px 14px;
@@ -95,8 +103,10 @@
   <div id="status" aria-live="polite"><p>Checking…</p></div>
 
   <div class="card">
-    <div id="map" aria-label="3D map of the location"></div>
-    <div class="cap"><span id="cap-place">—</span><span>drag to look around</span></div>
+    <div id="map" aria-label="3D map of the location" hidden></div>
+    <canvas id="stage" aria-label="Interactive 3D model of the blue truck" hidden></canvas>
+    <div id="loading" hidden>loading truck…</div>
+    <div class="cap"><span id="cap-place">—</span><span id="cap-hint">drag to look around</span></div>
   </div>
 
   <footer>
@@ -106,7 +116,18 @@
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
 (async function () {
   const bust = "?t=" + Math.floor(Date.now() / 60000); // fresh every minute, cached otherwise
   const [config, status] = await Promise.all([
@@ -143,7 +164,7 @@
   } else {
     const w = config.work || {};
     statusEl.innerHTML = `<p>${esc(name)} is probably at work at ${esc(w.name || "Blue Truck")} right now, nothing going on :/</p>`;
-    focus = { lat: w.lat, lng: w.lng, label: `${esc(w.name || "work")}${w.city ? ", " + esc(w.city) : ""}` };
+    focus = { truck: true, label: `${esc(w.name || "work")}${w.city ? ", " + esc(w.city) : ""}` };
   }
   document.getElementById("cap-place").innerHTML = focus.label;
 
@@ -160,7 +181,85 @@
     a.hidden = false;
   }
 
-  // ----- small movable 3D map -----
+  if (focus.truck) { showTruck(); } else { showMap(focus); }
+
+  // ----- the blue truck (work mode) -----
+  function showTruck() {
+    const canvas = document.getElementById("stage");
+    const loadingEl = document.getElementById("loading");
+    canvas.hidden = false; loadingEl.hidden = false;
+    document.getElementById("cap-hint").textContent = "drag to spin · scroll to zoom";
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    const scene = new THREE.Scene();
+    scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+
+    const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 100);
+    camera.position.set(2.3, 1.05, 2.7);
+
+    const controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 1.2;
+    controls.maxPolarAngle = Math.PI / 2 - 0.05; // don't go under the ground
+    controls.minDistance = 1.5;
+    controls.maxDistance = 8;
+    ["pointerdown", "wheel", "touchstart"].forEach(ev =>
+      canvas.addEventListener(ev, () => { controls.autoRotate = false; }, { passive: true }));
+
+    const sun = new THREE.DirectionalLight(0xfff3e0, 2.2);
+    sun.position.set(3, 5, 2);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.radius = 6;
+    sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 20;
+    scene.add(sun, new THREE.AmbientLight(0xffffff, 0.25));
+
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(4, 64), new THREE.ShadowMaterial({ opacity: 0.22 }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    new GLTFLoader().load(
+      "assets/truck.glb",
+      ({ scene: truck }) => {
+        truck.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+        // Sit it on the ground, centre it, scale to ~2.4 units long.
+        const box = new THREE.Box3().setFromObject(truck);
+        const size = box.getSize(new THREE.Vector3());
+        truck.scale.setScalar(2.4 / Math.max(size.x, size.y, size.z));
+        box.setFromObject(truck);
+        const c = box.getCenter(new THREE.Vector3());
+        truck.position.set(-c.x, -box.min.y, -c.z);
+        scene.add(truck);
+        controls.target.set(0, (box.max.y - box.min.y) * 0.42, 0);
+        loadingEl.remove();
+      },
+      xhr => { if (xhr.total) loadingEl.textContent = `loading truck… ${Math.round(100 * xhr.loaded / xhr.total)}%`; },
+      err => { loadingEl.textContent = "couldn't load the truck :/"; console.error(err); }
+    );
+
+    const resize = () => {
+      const w = canvas.clientWidth, h = canvas.clientHeight, pr = renderer.getPixelRatio();
+      if (canvas.width !== Math.floor(w * pr) || canvas.height !== Math.floor(h * pr)) {
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+    };
+    renderer.setAnimationLoop(() => { resize(); controls.update(); renderer.render(scene, camera); });
+  }
+
+  // ----- small movable 3D map (story mode) -----
+  function showMap(focus) {
+  document.getElementById("map").hidden = false;
   const map = new maplibregl.Map({
     container: "map",
     style: "https://tiles.openfreemap.org/styles/liberty",
@@ -205,6 +304,7 @@
     ["mousedown", "touchstart", "wheel"].forEach(ev => map.on(ev, () => { spinning = false; }));
     spin();
   });
+  }
 })();
 </script>
 </body>
