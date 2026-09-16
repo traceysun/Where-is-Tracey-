@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Where is Tracey?</title>
+<meta name="description" content="Tracey's last known location, pulled from her latest Instagram story.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📍</text></svg>">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f6f1e8;
+    --ink: #1d1a16;
+    --muted: #7a7166;
+    --card: #ffffff;
+    --line: #e5dccd;
+    --accent: #d9482b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17150f;
+      --ink: #f1ebe0;
+      --muted: #9a9083;
+      --card: #211e17;
+      --line: #322d24;
+      --accent: #ff6a47;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: Inter, system-ui, -apple-system, sans-serif;
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: 32px 16px;
+  }
+  main { width: 100%; max-width: 520px; }
+  h1 {
+    font-family: Fraunces, Georgia, serif;
+    font-weight: 400;
+    font-size: clamp(34px, 7vw, 46px);
+    letter-spacing: -0.01em;
+    margin: 0 0 20px;
+    line-height: 1.05;
+  }
+  h1 em { font-style: italic; color: var(--accent); }
+  #status {
+    font-family: Fraunces, Georgia, serif;
+    font-size: clamp(19px, 3.6vw, 23px);
+    line-height: 1.45;
+    margin: 0 0 20px;
+    min-height: 2.9em;
+  }
+  #status p { margin: 0 0 .5em; }
+  #status .before { color: var(--muted); font-size: .86em; }
+  #status strong { font-weight: 600; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,.08);
+  }
+  #map { width: 100%; height: 300px; }
+  .cap {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 10px 14px;
+    font-size: 12.5px; color: var(--muted);
+    border-top: 1px solid var(--line);
+  }
+  .cap span:first-child { font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  footer {
+    margin-top: 18px;
+    font-size: 12.5px; color: var(--muted);
+    display: flex; flex-wrap: wrap; gap: 6px 14px;
+  }
+  footer a { color: inherit; }
+  .pin {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid #fff;
+    box-shadow: 0 0 0 6px rgba(217,72,43,.25), 0 4px 10px rgba(0,0,0,.3);
+  }
+  .maplibregl-ctrl-attrib { font-size: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Where is <em>Tracey</em>?</h1>
+  <div id="status" aria-live="polite"><p>Checking…</p></div>
+
+  <div class="card">
+    <div id="map" aria-label="3D map of the location"></div>
+    <div class="cap"><span id="cap-place">—</span><span>drag to look around</span></div>
+  </div>
+
+  <footer>
+    <span id="updated"></span>
+    <a id="ig" href="#" hidden target="_blank" rel="noopener">her instagram ↗</a>
+  </footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+(async function () {
+  const bust = "?t=" + Math.floor(Date.now() / 60000); // fresh every minute, cached otherwise
+  const [config, status] = await Promise.all([
+    fetch("config.json" + bust).then(r => r.json()),
+    fetch("data/status.json" + bust).then(r => r.json()).catch(() => ({ mode: "work" })),
+  ]);
+  const name = config.name || "Tracey";
+  const tz = config.timezone || "America/Los_Angeles";
+
+  // Instagram timestamps look like 2026-09-16T18:22:41+0000 - Safari wants the colon.
+  const parseTs = s => new Date(String(s).replace(/([+-]\d\d)(\d\d)$/, "$1:$2"));
+  const fmtTime = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz });
+  const fmtDay = d => d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: tz });
+  const sameDay = (a, b) => fmtDay(a) === fmtDay(b) &&
+    a.toLocaleDateString("en-US", { year: "numeric", timeZone: tz }) === b.toLocaleDateString("en-US", { year: "numeric", timeZone: tz });
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const where = loc => loc.city && loc.place && loc.city.toLowerCase() !== loc.place.toLowerCase()
+    ? `${esc(loc.place)}, ${esc(loc.city)}` : esc(loc.place || loc.city);
+
+  const statusEl = document.getElementById("status");
+  let focus; // { lat, lng, label }
+
+  if (status.mode === "story" && status.current) {
+    const cur = status.current;
+    const when = parseTs(cur.timestamp);
+    const timeStr = sameDay(when, new Date()) ? fmtTime(when) : `${fmtTime(when)} on ${fmtDay(when)}`;
+    let html = `<p>${esc(name)} was at <strong>${where(cur)}</strong> at ${timeStr}.</p>`;
+    const prev = status.previous;
+    if (prev && prev.place) {
+      html += `<p class="before">Before that, you could've run into her in ${esc(prev.city || prev.place)}, at ${esc(prev.place)}.</p>`;
+    }
+    statusEl.innerHTML = html;
+    focus = { lat: cur.lat, lng: cur.lng, label: where(cur) };
+  } else {
+    const w = config.work || {};
+    statusEl.innerHTML = `<p>${esc(name)} is probably at work at ${esc(w.name || "Blue Truck")} right now, nothing going on :/</p>`;
+    focus = { lat: w.lat, lng: w.lng, label: `${esc(w.name || "work")}${w.city ? ", " + esc(w.city) : ""}` };
+  }
+  document.getElementById("cap-place").innerHTML = focus.label;
+
+  if (status.updated_at) {
+    const u = new Date(status.updated_at);
+    document.getElementById("updated").textContent =
+      `last updated ${fmtDay(u)} ${fmtTime(u)} · from her latest story`;
+  } else {
+    document.getElementById("updated").textContent = "updates from her latest instagram story";
+  }
+  if (config.instagram_username) {
+    const a = document.getElementById("ig");
+    a.href = "https://instagram.com/" + config.instagram_username;
+    a.hidden = false;
+  }
+
+  // ----- small movable 3D map -----
+  const map = new maplibregl.Map({
+    container: "map",
+    style: "https://tiles.openfreemap.org/styles/liberty",
+    center: [focus.lng, focus.lat],
+    zoom: 16.2,
+    pitch: 62,
+    bearing: -20,
+    attributionControl: { compact: true },
+    maxPitch: 75,
+  });
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+
+  const pin = document.createElement("div");
+  pin.className = "pin";
+  new maplibregl.Marker({ element: pin }).setLngLat([focus.lng, focus.lat]).addTo(map);
+
+  map.on("load", () => {
+    // Liberty ships 3D buildings, but add our own extrusions if the style ever drops them.
+    const has3d = map.getStyle().layers.some(l => l.type === "fill-extrusion");
+    if (!has3d && map.getSource("openmaptiles")) {
+      map.addLayer({
+        id: "buildings-3d",
+        type: "fill-extrusion",
+        source: "openmaptiles",
+        "source-layer": "building",
+        minzoom: 14,
+        paint: {
+          "fill-extrusion-color": "#d8cfc0",
+          "fill-extrusion-height": ["coalesce", ["get", "render_height"], 8],
+          "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+          "fill-extrusion-opacity": 0.9,
+        },
+      });
+    }
+    // Slow orbit until someone grabs it.
+    let spinning = true;
+    const spin = () => {
+      if (!spinning) return;
+      map.easeTo({ bearing: map.getBearing() + 12, duration: 6000, easing: t => t });
+    };
+    map.on("moveend", spin);
+    ["mousedown", "touchstart", "wheel"].forEach(ev => map.on(ev, () => { spinning = false; }));
+    spin();
+  });
+})();
+</script>
+</body>
+</html>

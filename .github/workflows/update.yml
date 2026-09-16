@@ -1,0 +1,48 @@
+name: Update location
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # check stories every 30 min
+    - cron: "0 9 * * *"      # once a day also refresh the Instagram token
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-status
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Read latest story
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          REFRESH_TOKEN: ${{ (github.event.schedule == '0 9 * * *' || github.event_name == 'workflow_dispatch') && '1' || '0' }}
+        run: python scripts/update_status.py
+
+      - name: Commit status
+        run: |
+          git config user.name "where-is-tracey bot"
+          git config user.email "actions@users.noreply.github.com"
+          if git diff --quiet -- data/status.json; then
+            echo "nothing to commit"
+            exit 0
+          fi
+          git add data/status.json
+          git commit -m "Update location $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git pull --rebase origin main
+          git push
