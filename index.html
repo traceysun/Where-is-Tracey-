@@ -70,10 +70,14 @@
   #stage { width: 100%; height: 300px; display: block; touch-action: none; cursor: grab; }
   #stage:active { cursor: grabbing; }
   #loading {
-    position: absolute; inset: 0 0 41px 0; display: grid; place-items: center;
+    position: absolute; inset: 0; display: grid; place-items: center;
     font-size: 13px; color: var(--muted); pointer-events: none;
   }
   .card { position: relative; }
+  /* Truck mode: no frame, the model just floats on the page. */
+  .card.bare { background: none; border: 0; box-shadow: none; border-radius: 0; overflow: visible; }
+  .card.bare .cap { display: none; }
+  .card.bare #stage { height: 340px; }
   [hidden] { display: none !important; }
   .cap {
     display: flex; justify-content: space-between; gap: 12px;
@@ -188,7 +192,7 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
     const canvas = document.getElementById("stage");
     const loadingEl = document.getElementById("loading");
     canvas.hidden = false; loadingEl.hidden = false;
-    document.getElementById("cap-hint").textContent = "drag to spin · scroll to zoom";
+    canvas.closest(".card").classList.add("bare");
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
