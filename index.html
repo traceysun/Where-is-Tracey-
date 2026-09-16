@@ -78,7 +78,7 @@
   /* Truck mode: no frame, the model just floats on the page. */
   .card.bare { background: none; border: 0; box-shadow: none; border-radius: 0; overflow: visible; }
   .card.bare .cap { display: none; }
-  .card.bare #stage { height: 340px; }
+  .card.bare #stage { height: 380px; }
   [hidden] { display: none !important; }
   .cap {
     display: flex; justify-content: space-between; gap: 12px;
@@ -244,14 +244,16 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
     controls.dampingFactor = 0.06;
     controls.autoRotate = true;
     controls.autoRotateSpeed = 1.2;
-    controls.maxPolarAngle = Math.PI / 2 - 0.05; // don't go under the ground
-    controls.minDistance = 1.5;
-    controls.maxDistance = 8;
+    controls.maxPolarAngle = Math.PI / 2 - 0.12; // don't go under the ground
+    controls.minPolarAngle = 0.35;
+    controls.enablePan = false;                   // can't drag the truck off-canvas
+    controls.minDistance = 3.8;                   // can't zoom in so far it gets clipped
+    controls.maxDistance = 6;
     ["pointerdown", "wheel", "touchstart"].forEach(ev =>
       canvas.addEventListener(ev, () => { controls.autoRotate = false; }, { passive: true }));
 
     const sun = new THREE.DirectionalLight(0xfff3e0, 2.2);
-    sun.position.set(3, 5, 2);
+    sun.position.set(2, 9, 1.5);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.radius = 6;
