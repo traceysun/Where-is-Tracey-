@@ -1,0 +1,10 @@
+# Not part of the website - keep these off the CDN.
+.git
+.github
+scripts
+requirements.txt
+wrangler.jsonc
+.assetsignore
+.gitattributes
+.gitignore
+README.md

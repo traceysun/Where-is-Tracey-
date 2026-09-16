@@ -1,0 +1,11 @@
+// Cloudflare Workers config: serve this repo as a static site.
+// Deploy = `npx wrangler deploy` (Cloudflare runs this on every push to main).
+{
+  "name": "where-is-tracey",
+  "compatibility_date": "2026-09-16",
+  "assets": {
+    "directory": "./",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash"
+  }
+}
